@@ -7,7 +7,7 @@ on:
         description: "Integrate YouPiP"
         type: boolean
         required: true
-        default: false
+        default: true
 
       enable_ytuhd:
         description: "Integrate YTUHD"
@@ -53,9 +53,14 @@ on:
 
       tweak_version:
         description: "The version of the tweak to use. Enter the version manually from dayanch96/YTLite/releases or leave default"
-        default: "5.2.2"
+        default: "5.2b4"
         required: true
         type: string
+
+      enable_compatibility:
+        description: "Apply compatibility fixes (YouTube 21.42.4 / free 5.2b4 only)"
+        type: boolean
+        default: true
 
       display_name:
         description: "App Name (Optional)"
@@ -100,6 +105,8 @@ jobs:
       contents: write
 
     steps:
+      - uses: actions/checkout@v6
+
       - name: Download built debs
         uses: actions/download-artifact@v8
         with:
@@ -141,6 +148,22 @@ jobs:
             [ -f "$f" ] && tweaks="$tweaks $f"
           done
           cyan -i youtube.ipa -o YouTubePlus_${{ github.event.inputs.tweak_version }}.ipa -uwef $tweaks -n "${{ github.event.inputs.display_name }}" -b ${{ github.event.inputs.bundle_id }}
+
+      - name: Apply YouTube 21.42.4 compatibility
+        if: ${{ inputs.enable_compatibility }}
+        env:
+          TWEAK_VERSION: ${{ inputs.tweak_version }}
+        run: |
+          set -euo pipefail
+          test "$TWEAK_VERSION" = "5.2b4" || { echo "Compatibility fixes require free 5.2b4"; exit 1; }
+          ipa="YouTubePlus_${TWEAK_VERSION}.ipa"
+          unzip -q "$ipa" -d compat_staging
+          cyan_python="$(pipx environment --value PIPX_LOCAL_VENVS)/cyan/bin/python"
+          insert_dylib="$($cyan_python -c 'from cyan.tbhtypes.executable import Executable; print(Executable.idylib)')"
+          app=$(find compat_staging/Payload -maxdepth 1 -name '*.app' -print -quit)
+          python3 compatibility/patch_app.py "$app" --insert-dylib "$insert_dylib"
+          rm "$ipa"
+          (cd compat_staging && zip -qry "../$ipa" .)
 
       - name: Upload to GitHub Releases
         uses: softprops/action-gh-release@v3

@@ -1,4 +1,7 @@
 # YouTube Plus (ex. YTLite)
+
+> This fork adds compatibility fixes for **YouTube 21.42.4 + free YouTube Plus 5.2b4**. See [build instructions and validation status](compatibility/README.md).
+
 A flexible enhancer for YouTube on iOS, featuring over hundred customizable options.
 
 ## Table of Contents

@@ -1,0 +1,20 @@
+name: Compatibility checks
+on:
+  push:
+    paths: ['compatibility/**', '.github/workflows/compatibility.yml']
+  pull_request:
+    paths: ['compatibility/**', '.github/workflows/compatibility.yml']
+jobs:
+  check:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Test guarded Mach-O patch
+        run: python3 -m unittest discover -s compatibility -p 'test_*.py'
+      - name: Compile iOS adapter
+        run: >-
+          xcrun --sdk iphoneos clang -arch arm64 -miphoneos-version-min=15.0
+          -dynamiclib -fobjc-arc -Wall -Wextra -Werror -Wno-unused-parameter
+          -framework Foundation -framework UIKit
+          -install_name @rpath/YouTubeCompatibility.dylib
+          compatibility/YouTubeCompatibility.m -o /tmp/YouTubeCompatibility.dylib
