@@ -187,6 +187,14 @@ static void itemLayout(id self, SEL cmd) {
     originalItemLayout(self,cmd);
     if ([sendObject(sendObject(self,"renderer"),"pivotIdentifier") isEqual:compatibilityPivot]) {
         UIButton *button = sendObject(self,"navigationButton");
+        static UIImage *icon;
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{ icon = [[UIImage systemImageNamed:@"gearshape"] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate]; });
+        for (NSNumber *state in @[@(UIControlStateNormal), @(UIControlStateSelected), @(UIControlStateHighlighted)]) {
+            if ([button imageForState:state.unsignedIntegerValue] != icon)
+                [button setImage:icon forState:state.unsignedIntegerValue];
+        }
+        if (button.imageView.image != icon) button.imageView.image = icon;
         button.imageView.hidden = NO;
         button.imageView.alpha = 1;
         button.hidden = NO;
