@@ -104,16 +104,19 @@ static id trackedResponse(id self, SEL cmd) {
 @end
 
 static void (*originalSetRenderer)(id, SEL, id);
+static void (*originalFloatingRenderer)(id, SEL, id);
+static void (*originalClassicRenderer)(id, SEL, id);
 static void (*originalDidTap)(id, SEL, id);
 static id (*originalSpeedInit)(id, SEL);
 static void (*originalPressSpeed)(id, SEL, id);
+static void (*originalItemLayout)(id, SEL);
 static NSString *const compatibilityPivot = @"FEytplus_compatibility";
 
 static id sendObject(id receiver, const char *selector) {
     SEL sel = sel_registerName(selector);
     return [receiver respondsToSelector:sel] ? ((id(*)(id,SEL))objc_msgSend)(receiver,sel) : nil;
 }
-static void setPivotRenderer(id self, SEL cmd, id renderer) {
+static void addCompatibilityItem(id renderer) {
     NSMutableArray *items = [sendObject(renderer, "itemsArray") mutableCopy];
     BOOL exists = NO;
     NSUInteger insertAt = items.count;
@@ -136,7 +139,18 @@ static void setPivotRenderer(id self, SEL cmd, id renderer) {
             [renderer setValue:items forKey:@"itemsArray"];
         }
     }
+}
+static void setPivotRenderer(id self, SEL cmd, id renderer) {
+    addCompatibilityItem(renderer);
     originalSetRenderer(self,cmd,renderer);
+}
+static void setFloatingRenderer(id self, SEL cmd, id renderer) {
+    addCompatibilityItem(renderer);
+    originalFloatingRenderer(self,cmd,renderer);
+}
+static void setClassicRenderer(id self, SEL cmd, id renderer) {
+    addCompatibilityItem(renderer);
+    originalClassicRenderer(self,cmd,renderer);
 }
 static void didTapPivot(id self, SEL cmd, id renderer) {
     if ([sendObject(renderer, "pivotIdentifier") isEqual:compatibilityPivot]) {
@@ -169,6 +183,15 @@ static id speedInit(id self, SEL cmd) {
     } @catch (NSException *exception) { NSLog(@"YTCompatibility speed: %@",exception.reason); }
     return result;
 }
+static void itemLayout(id self, SEL cmd) {
+    originalItemLayout(self,cmd);
+    if ([sendObject(sendObject(self,"renderer"),"pivotIdentifier") isEqual:compatibilityPivot]) {
+        UIButton *button = sendObject(self,"navigationButton");
+        button.imageView.hidden = NO;
+        button.imageView.alpha = 1;
+        button.hidden = NO;
+    }
+}
 static void pressSpeed(id self, SEL cmd, id sender) {
     id controller = sendObject(activePlayer,"varispeedController");
     SEL show = sel_registerName("showMenuFromView:");
@@ -193,6 +216,12 @@ __attribute__((constructor)) static void installMenu(void) {
         originalSetRenderer = (void *)method_setImplementation(renderer,(IMP)setPivotRenderer);
         originalDidTap = (void *)method_setImplementation(tap,(IMP)didTapPivot);
     }
+    Method floating = class_getInstanceMethod(NSClassFromString(@"YTFloatingPivotBarView"),sel_registerName("setRenderer:"));
+    if (floating) originalFloatingRenderer = (void *)method_setImplementation(floating,(IMP)setFloatingRenderer);
+    Method classic = class_getInstanceMethod(NSClassFromString(@"YTPivotBarView"),sel_registerName("setRenderer:"));
+    if (classic) originalClassicRenderer = (void *)method_setImplementation(classic,(IMP)setClassicRenderer);
+    Method layout = class_getInstanceMethod(NSClassFromString(@"YTPivotBarItemView"),@selector(layoutSubviews));
+    if (layout) originalItemLayout = (void *)method_setImplementation(layout,(IMP)itemLayout);
     Method speed = class_getInstanceMethod(NSClassFromString(@"YTVarispeedSwitchControllerImpl"),@selector(init));
     if (speed) originalSpeedInit = (void *)method_setImplementation(speed,(IMP)speedInit);
     Method press = class_getInstanceMethod(NSClassFromString(@"YTMainAppVideoPlayerOverlayViewController"),sel_registerName("didPressVarispeed:"));

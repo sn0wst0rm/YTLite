@@ -58,6 +58,9 @@ python3 -m unittest discover -s compatibility -p 'test_*.py'
 
 The original video-opening crash was reproduced on iOS 27.1. After the getter
 bridge, two videos played successfully with audio, confirmed on the device.
-Settings were instantiated and displayed successfully. Individual menu commands
+Settings were instantiated and displayed successfully. Runtime inspection confirmed
+the native speed controller contains options through 5×. The sidebar entry is
+inserted at the view and controller levels, and its icon is explicitly kept visible
+when YouTube lays out the custom item. Visual verification of this last fix, menu commands
 and PiP require device testing; the unit tests cover binary address mapping,
 byte preservation, idempotence, and rejection of unexpected inputs.
