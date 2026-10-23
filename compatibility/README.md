@@ -61,6 +61,7 @@ bridge, two videos played successfully with audio, confirmed on the device.
 Settings were instantiated and displayed successfully. Runtime inspection confirmed
 the native speed controller contains options through 5×. The sidebar entry is
 inserted at the view and controller levels, and its icon is explicitly kept visible
-when YouTube lays out the custom item. Visual verification of this last fix, menu commands
-and PiP require device testing; the unit tests cover binary address mapping,
+when YouTube lays out the custom item. The user confirmed the dedicated gear
+is visible after installation. Download, PiP, and selecting extended speeds
+still require device testing; the unit tests cover binary address mapping,
 byte preservation, idempotence, and rejection of unexpected inputs.
