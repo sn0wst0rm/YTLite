@@ -16,9 +16,15 @@ rebuild that release from the old sources.
   avoids the removed `YTIShareEntityEndpoint.shareEntityEndpoint` API. The native
   share replacement is disabled; YouTube's original sharing remains available.
 - Add a native **YT+** pivot-bar entry immediately after the profile/You item.
-  YouTube positions it in the Duo sidebar or compact tab bar and hides it with
-  the bar during fullscreen playback. It opens the original tweak settings and
-  provides download, playback speed, and PiP commands when a video is available.
+  YouTube positions it in the Duo sidebar or compact tab bar. It opens the original
+  tweak settings and provides download and PiP commands when a video is available.
+- Keep the native vertical sidebar visible on the expanded watch page (outside
+  fullscreen). Selecting a destination first collapses the watch page through
+  YouTube’s native completion-based transition, then performs normal navigation.
+- Put playback speed directly in the player controls, using a speedometer button
+  registered with YTVideoOverlay. It follows the player controls’ visibility and
+  opens the native speed menu. The duplicate speed action in the home YT+ menu
+  is removed.
 - Extend the renamed `YTVarispeedSwitchControllerImpl` speed options with 2.5×,
   3×, 3.5×, 4×, and 5×. The old tweak hooked a class name that no longer exists. The player's speed
   action now opens this native client-side menu instead of a server-provided sheet.

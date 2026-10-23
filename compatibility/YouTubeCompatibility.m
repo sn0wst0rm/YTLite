@@ -20,6 +20,7 @@ __attribute__((constructor)) static void installCompatibility(void) {
 }
 
 #import <UIKit/UIKit.h>
+#import <dlfcn.h>
 
 static __weak id activePlayer;
 static id (*responseBridge)(id, SEL);
@@ -79,19 +80,6 @@ static id trackedResponse(id self, SEL cmd) {
         @catch (NSException *exception) { NSLog(@"YTCompatibility download: %@", exception.reason); [self message:@"Il menu download non è compatibile con questo video." window:window]; }
     }];
     download.enabled = hasVideo; [menu addAction:download];
-    UIAlertAction *speed = [UIAlertAction actionWithTitle:@"Velocità di riproduzione" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        UIAlertController *rates = [UIAlertController alertControllerWithTitle:@"Velocità" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-        for (NSNumber *rate in @[@0.25, @0.5, @0.75, @1, @1.25, @1.5, @1.75, @2, @2.5, @3]) {
-            [rates addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%@×", rate] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-                ((void(*)(id,SEL,float))objc_msgSend)(player, sel_registerName("setPlaybackRate:"), rate.floatValue);
-            }]];
-        }
-        [rates addAction:[UIAlertAction actionWithTitle:@"Annulla" style:UIAlertActionStyleCancel handler:nil]];
-        rates.popoverPresentationController.sourceView = sender;
-        rates.popoverPresentationController.sourceRect = sender.bounds;
-        [[self presenter:window] presentViewController:rates animated:YES completion:nil];
-    }];
-    speed.enabled = hasVideo && [player respondsToSelector:sel_registerName("setPlaybackRate:")]; [menu addAction:speed];
     UIAlertAction *pip = [UIAlertAction actionWithTitle:@"Picture-in-Picture" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         ((void(*)(id,SEL))objc_msgSend)(player, sel_registerName("switchToPip"));
     }];
@@ -152,12 +140,55 @@ static void setClassicRenderer(id self, SEL cmd, id renderer) {
     addCompatibilityItem(renderer);
     originalClassicRenderer(self,cmd,renderer);
 }
+static BOOL sendBool(id receiver, const char *selector) {
+    SEL sel = sel_registerName(selector);
+    return [receiver respondsToSelector:sel] && ((BOOL(*)(id,SEL))objc_msgSend)(receiver,sel);
+}
+static BOOL keepWatchSidebar(id root) {
+    return sendBool(sendObject(root,"view"),"isPivotBarVertical") &&
+        sendBool(root,"isWatchPageExpanded") && !sendBool(root,"isWatchPageFullScreen");
+}
+static void (*originalRootLayout)(id,SEL);
+static void (*originalHidePivot)(id,SEL);
+static void (*originalExpansion)(id,SEL,double);
+static __weak id sidebarRoot;
+static void preserveSidebar(id root) {
+    if (!keepWatchSidebar(root)) return;
+    UIView *view = sendObject(root,"view");
+    UIView *bar = sendObject(sendObject(root,"pivotBarViewController"),"view");
+    if (!bar || bar.superview != view) return;
+    if (sendBool(root,"isPivotBarHidden"))
+        ((void(*)(id,SEL))objc_msgSend)(root,sel_registerName("showPivotBar"));
+    bar.hidden = NO;
+    bar.alpha = 1;
+    if (view.subviews.lastObject != bar) [view bringSubviewToFront:bar];
+}
+static void rootLayout(id self, SEL cmd) {
+    originalRootLayout(self,cmd);
+    sidebarRoot = self;
+    preserveSidebar(self);
+}
+static void hidePivot(id self, SEL cmd) {
+    sidebarRoot = self;
+    if (keepWatchSidebar(self)) preserveSidebar(self);
+    else originalHidePivot(self,cmd);
+}
+static void expansionUpdated(id self, SEL cmd, double fraction) {
+    originalExpansion(self,cmd,fraction);
+    if (sendObject(sidebarRoot,"view") == self) preserveSidebar(sidebarRoot);
+}
 static void didTapPivot(id self, SEL cmd, id renderer) {
     if ([sendObject(renderer, "pivotIdentifier") isEqual:compatibilityPivot]) {
         SEL lookup = sel_registerName("pivotBarItemViewForPivotIdentifier:");
         UIView *anchor = [self respondsToSelector:lookup] ? ((id(*)(id,SEL,id))objc_msgSend)(self,lookup,compatibilityPivot) : nil;
         if (!anchor) anchor = sendObject(self,"view");
         [YTCompatibilityMenu.shared open:(UIButton *)anchor];
+        return;
+    }
+    id root = sendObject(self,"parentViewController");
+    SEL collapse = sel_registerName("collapseWatchWithCompletion:");
+    if (keepWatchSidebar(root) && [root respondsToSelector:collapse]) {
+        ((void(*)(id,SEL,id))objc_msgSend)(root,collapse,^{ originalDidTap(self,cmd,renderer); });
         return;
     }
     originalDidTap(self,cmd,renderer);
@@ -210,7 +241,51 @@ static void pressSpeed(id self, SEL cmd, id sender) {
     }
     originalPressSpeed(self,cmd,sender);
 }
+static id (*originalTopImage)(id, SEL, id);
+static id (*originalBottomImage)(id, SEL, id);
+static NSString *const speedOverlayKey = @"YTCompatibilitySpeed";
+static id topButtonImage(id self, SEL cmd, id key) {
+    if ([key isEqual:speedOverlayKey]) return [UIImage systemImageNamed:@"speedometer"];
+    return originalTopImage ? originalTopImage(self,cmd,key) : nil;
+}
+static id bottomButtonImage(id self, SEL cmd, id key) {
+    if ([key isEqual:speedOverlayKey]) return [UIImage systemImageNamed:@"speedometer"];
+    return originalBottomImage ? originalBottomImage(self,cmd,key) : nil;
+}
+static void playerSpeedButton(id self, SEL cmd, UIView *sender) {
+    id controller = sendObject(activePlayer,"varispeedController");
+    SEL show = sel_registerName("showMenuFromView:");
+    if ([controller respondsToSelector:show])
+        ((void(*)(id,SEL,id))objc_msgSend)(controller,show,sender);
+}
+static void installSpeedOverlay(void) {
+    NSString *path = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Frameworks/YTVideoOverlay.dylib"];
+    dlopen(path.UTF8String, RTLD_NOW);
+    Class manager = NSClassFromString(@"YTSettingsSectionItemManager");
+    SEL registerTweak = sel_registerName("registerTweak:metadata:");
+    if (![manager respondsToSelector:registerTweak]) return;
+    Class top = NSClassFromString(@"YTMainAppControlsOverlayView");
+    Class bottom = NSClassFromString(@"YTInlinePlayerBarContainerView");
+    SEL action = sel_registerName("ytcompatDidPressSpeed:");
+    class_addMethod(top,action,(IMP)playerSpeedButton,"v@:@");
+    class_addMethod(bottom,action,(IMP)playerSpeedButton,"v@:@");
+    Method topImage = class_getInstanceMethod(top,sel_registerName("buttonImage:"));
+    Method bottomImage = class_getInstanceMethod(bottom,sel_registerName("buttonImage:"));
+    if (topImage) originalTopImage = (void *)method_setImplementation(topImage,(IMP)topButtonImage);
+    if (bottomImage) originalBottomImage = (void *)method_setImplementation(bottomImage,(IMP)bottomButtonImage);
+    [NSUserDefaults.standardUserDefaults registerDefaults:@{@"YTVideoOverlay-YTCompatibilitySpeed-Enabled":@YES}];
+    ((void(*)(id,SEL,id,id))objc_msgSend)(manager,registerTweak,speedOverlayKey,@{
+        @"accessibilityLabel":@"Velocità di riproduzione", @"selector":@"ytcompatDidPressSpeed:"});
+}
 __attribute__((constructor)) static void installMenu(void) {
+    installSpeedOverlay();
+    Class root = NSClassFromString(@"YTAppViewControllerImpl");
+    Method rootLayoutMethod = class_getInstanceMethod(root,@selector(viewDidLayoutSubviews));
+    if (rootLayoutMethod) originalRootLayout = (void *)method_setImplementation(rootLayoutMethod,(IMP)rootLayout);
+    Method hide = class_getInstanceMethod(root,sel_registerName("hidePivotBar"));
+    if (hide) originalHidePivot = (void *)method_setImplementation(hide,(IMP)hidePivot);
+    Method expansion = class_getInstanceMethod(NSClassFromString(@"YTAppView"),sel_registerName("didUpdateExpansionFraction:"));
+    if (expansion) originalExpansion = (void *)method_setImplementation(expansion,(IMP)expansionUpdated);
     Class cls = objc_getClass("YTPlayerViewController");
     Method getter = class_getInstanceMethod(cls, sel_registerName("contentPlayerResponse"));
     if (getter) {
