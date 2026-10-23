@@ -146,13 +146,14 @@ static BOOL sendBool(id receiver, const char *selector) {
 }
 static BOOL keepWatchSidebar(id root) {
     return sendBool(sendObject(root,"view"),"isPivotBarVertical") &&
-        sendBool(root,"isWatchPageExpanded") && !sendBool(root,"isWatchPageFullScreen");
+        !sendBool(root,"isWatchPageFullScreen");
 }
 static void (*originalRootLayout)(id,SEL);
 static void (*originalHidePivot)(id,SEL);
 static void (*originalExpansion)(id,SEL,double);
 static void (*originalAppViewLayout)(id,SEL);
 static char sidebarTrailingInsetKey;
+static CGRect (*originalPivotFrame)(id,SEL);
 static __weak id sidebarRoot;
 static void preserveSidebar(id root) {
     if (!keepWatchSidebar(root)) return;
@@ -161,16 +162,19 @@ static void preserveSidebar(id root) {
     if (!bar || bar.superview != view) return;
     if (sendBool(root,"isPivotBarHidden"))
         ((void(*)(id,SEL))objc_msgSend)(root,sel_registerName("showPivotBar"));
-    // The watch expansion also moves the floating bar beyond the right edge,
-    // independently of pivotBarHidden. Restore its on-screen native placement.
-    CGRect frame = bar.frame;
-    NSNumber *savedInset = objc_getAssociatedObject(view,&sidebarTrailingInsetKey);
-    CGFloat trailing = savedInset ? savedInset.doubleValue : MAX(view.safeAreaInsets.right,22.0);
-    frame.origin.x = (view.bounds.origin.x + view.bounds.size.width) - trailing - frame.size.width;
-    if (bar.frame.origin.x != frame.origin.x) bar.frame = frame;
     bar.hidden = NO;
     bar.alpha = 1;
     if (view.subviews.lastObject != bar) [view bringSubviewToFront:bar];
+}
+static CGRect pivotFrame(id self, SEL cmd) {
+    CGRect frame = originalPivotFrame(self,cmd);
+    if (sendObject(sidebarRoot,"view") == self && keepWatchSidebar(sidebarRoot)) {
+        UIView *view = self;
+        NSNumber *savedInset = objc_getAssociatedObject(view,&sidebarTrailingInsetKey);
+        CGFloat trailing = savedInset ? savedInset.doubleValue : MAX(view.safeAreaInsets.right,22.0);
+        frame.origin.x = view.bounds.origin.x + view.bounds.size.width - trailing - frame.size.width;
+    }
+    return frame;
 }
 static void appViewLayout(id self, SEL cmd) {
     originalAppViewLayout(self,cmd);
@@ -185,8 +189,8 @@ static void appViewLayout(id self, SEL cmd) {
     if (sendObject(sidebarRoot,"view") == self) preserveSidebar(sidebarRoot);
 }
 static void rootLayout(id self, SEL cmd) {
-    originalRootLayout(self,cmd);
     sidebarRoot = self;
+    originalRootLayout(self,cmd);
     preserveSidebar(self);
 }
 static void hidePivot(id self, SEL cmd) {
@@ -208,7 +212,7 @@ static void didTapPivot(id self, SEL cmd, id renderer) {
     }
     id root = sendObject(self,"parentViewController");
     SEL collapse = sel_registerName("collapseWatchWithCompletion:");
-    if (keepWatchSidebar(root) && [root respondsToSelector:collapse]) {
+    if (keepWatchSidebar(root) && sendBool(root,"isWatchPageExpanded") && [root respondsToSelector:collapse]) {
         ((void(*)(id,SEL,id))objc_msgSend)(root,collapse,^{ originalDidTap(self,cmd,renderer); });
         return;
     }
@@ -300,6 +304,8 @@ static void installSpeedOverlay(void) {
 }
 __attribute__((constructor)) static void installMenu(void) {
     installSpeedOverlay();
+    Method frameMethod = class_getInstanceMethod(NSClassFromString(@"YTAppView"),sel_registerName("pivotBarFrame"));
+    if (frameMethod) originalPivotFrame = (void *)method_setImplementation(frameMethod,(IMP)pivotFrame);
     Method appLayout = class_getInstanceMethod(NSClassFromString(@"YTAppView"),@selector(layoutSubviews));
     if (appLayout) originalAppViewLayout = (void *)method_setImplementation(appLayout,(IMP)appViewLayout);
     Class root = NSClassFromString(@"YTAppViewControllerImpl");
