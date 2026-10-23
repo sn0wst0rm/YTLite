@@ -21,6 +21,13 @@ rebuild that release from the old sources.
 - Keep the native vertical sidebar visible on the expanded watch page (outside
   fullscreen). Selecting a destination first collapses the watch page through
   YouTube’s native completion-based transition, then performs normal navigation.
+  `YTAppView.pivotBarFrame` supplies the on-screen position using the normal
+  sidebar trailing inset. The policy applies throughout the transition, before
+  `isWatchPageExpanded` becomes true. It is disabled for fullscreen video.
+  This avoids moving the view again after layout, which would conflict with
+  YouTube's own off-screen frame calculation and repeatedly invalidate layout.
+  Tapping a normal destination uses `collapseWatchWithCompletion:` before
+  forwarding to the original pivot selection handler.
 - Put playback speed directly in the player controls, using a speedometer button
   registered with YTVideoOverlay. It follows the player controls’ visibility and
   opens the native speed menu. The duplicate speed action in the home YT+ menu
@@ -71,3 +78,18 @@ when YouTube lays out the custom item. The user confirmed the dedicated gear
 is visible after installation. Download, PiP, and selecting extended speeds
 still require device testing; the unit tests cover binary address mapping,
 byte preservation, idempotence, and rejection of unexpected inputs.
+
+### Device UI verification (2026-10-23)
+
+Tested directly in Device Hub on the Duo in landscape, and confirmed by the user:
+
+- Sidebar remains visible beside an expanded video with comments and recommendations.
+- Home and Subscriptions both navigate while playback continues in the miniplayer.
+- Reopening the miniplayer preserves the sidebar.
+- Fullscreen playback hides the sidebar; exiting fullscreen restores it.
+- The speedometer is present in the player controls, including fullscreen.
+
+The source build and guarded binary-patch unit tests also pass in GitHub Actions.
+The installed app was signed separately with the user's developer identity.
+The repository contains the adapter, patcher, tests, and build workflow; decrypted
+YouTube binaries, private signing keys, profiles, and device backups stay local.
