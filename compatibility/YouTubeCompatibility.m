@@ -151,6 +151,8 @@ static BOOL keepWatchSidebar(id root) {
 static void (*originalRootLayout)(id,SEL);
 static void (*originalHidePivot)(id,SEL);
 static void (*originalExpansion)(id,SEL,double);
+static void (*originalAppViewLayout)(id,SEL);
+static char sidebarTrailingInsetKey;
 static __weak id sidebarRoot;
 static void preserveSidebar(id root) {
     if (!keepWatchSidebar(root)) return;
@@ -159,9 +161,28 @@ static void preserveSidebar(id root) {
     if (!bar || bar.superview != view) return;
     if (sendBool(root,"isPivotBarHidden"))
         ((void(*)(id,SEL))objc_msgSend)(root,sel_registerName("showPivotBar"));
+    // The watch expansion also moves the floating bar beyond the right edge,
+    // independently of pivotBarHidden. Restore its on-screen native placement.
+    CGRect frame = bar.frame;
+    NSNumber *savedInset = objc_getAssociatedObject(view,&sidebarTrailingInsetKey);
+    CGFloat trailing = savedInset ? savedInset.doubleValue : MAX(view.safeAreaInsets.right,22.0);
+    frame.origin.x = (view.bounds.origin.x + view.bounds.size.width) - trailing - frame.size.width;
+    if (bar.frame.origin.x != frame.origin.x) bar.frame = frame;
     bar.hidden = NO;
     bar.alpha = 1;
     if (view.subviews.lastObject != bar) [view bringSubviewToFront:bar];
+}
+static void appViewLayout(id self, SEL cmd) {
+    originalAppViewLayout(self,cmd);
+    UIView *view = self;
+    UIView *bar = sendObject(self,"pivotBarView");
+    if (sendBool(self,"isPivotBarVertical") && bar && !sendBool(sidebarRoot,"isWatchPageExpanded") &&
+        !sendBool(sidebarRoot,"isWatchPageFullScreen") && !bar.hidden && bar.alpha > 0 &&
+        (bar.frame.origin.x + bar.frame.size.width) <= (view.bounds.origin.x + view.bounds.size.width) && bar.frame.size.width > 0) {
+        CGFloat trailing = (view.bounds.origin.x + view.bounds.size.width) - (bar.frame.origin.x + bar.frame.size.width);
+        objc_setAssociatedObject(self,&sidebarTrailingInsetKey,@(trailing),OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (sendObject(sidebarRoot,"view") == self) preserveSidebar(sidebarRoot);
 }
 static void rootLayout(id self, SEL cmd) {
     originalRootLayout(self,cmd);
@@ -279,6 +300,8 @@ static void installSpeedOverlay(void) {
 }
 __attribute__((constructor)) static void installMenu(void) {
     installSpeedOverlay();
+    Method appLayout = class_getInstanceMethod(NSClassFromString(@"YTAppView"),@selector(layoutSubviews));
+    if (appLayout) originalAppViewLayout = (void *)method_setImplementation(appLayout,(IMP)appViewLayout);
     Class root = NSClassFromString(@"YTAppViewControllerImpl");
     Method rootLayoutMethod = class_getInstanceMethod(root,@selector(viewDidLayoutSubviews));
     if (rootLayoutMethod) originalRootLayout = (void *)method_setImplementation(rootLayoutMethod,(IMP)rootLayout);
